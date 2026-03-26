@@ -4,7 +4,7 @@
 
 ### Шаг 1 — Скачайте архив
 
-Скачайте последний `SpiralKnights-RU-*.zip` из раздела Releases.
+Скачайте последний `SpiralKnights-RU-*.zip` из раздела **[Releases](https://github.com/genius8loci/Spiral-Knights-Russia/releases)**.
 
 ### Шаг 2 — Найдите папку с игрой
 
