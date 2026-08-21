@@ -49,41 +49,14 @@ if (Test-Path $launchDebug) {
 }
 
 # README
-$readme = @"
-===============================================
-  Spiral Knights — Русская локализация
-  Версия: $version
-===============================================
-
-УСТАНОВКА:
-  1. Закройте игру если она запущена
-  2. Распакуйте ВСЕ файлы из этого архива
-     прямо в папку с игрой (где crucible.jar)
-     Обычно: C:\Program Files (x86)\Steam\steamapps\common\Spiral Knights\
-  3. Запускайте через launch-ru-steam.bat
-
-ЗАПУСК ЧЕРЕЗ STEAM (с трекингом времени):
-  1. Steam -> ПКМ на Spiral Knights -> Свойства
-  2. Общие -> Параметры запуска, вставить:
-     "C:\Program Files (x86)\Steam\steamapps\common\Spiral Knights\launch-ru-steam.bat" %command%
-  3. Теперь при нажатии Играть в Steam запустится русская версия
-
-ФАЙЛЫ:
-  code\ru-locale.jar    — перевод (подменяет английские строки)
-  launch-ru-steam.bat   — запуск через Steam (с трекингом времени)
-  launch-ru-debug.bat   — запуск с консолью (для отладки)
-
-ВАЖНО:
-  - Оригинальные файлы игры НЕ изменяются
-  - При обновлении игры перевод может потребовать обновления
-  - Чтобы вернуть английский — уберите параметры запуска в Steam
-
-УДАЛЕНИЕ:
-  Удалите эти файлы:
-    code\ru-locale.jar
-    launch-ru-steam.bat
-    launch-ru-debug.bat
-"@
+# README собирается из общего шаблона RELEASE-README.txt — тем же, что использует CI,
+# чтобы текст для игроков не расходился между локальной сборкой и релизом на GitHub.
+$readmeTemplate = Join-Path $scriptDir "RELEASE-README.txt"
+if (-not (Test-Path $readmeTemplate)) {
+    Write-Host "ERROR: RELEASE-README.txt not found!" -ForegroundColor Red
+    exit 1
+}
+$readme = (Get-Content $readmeTemplate -Raw -Encoding UTF8) -replace [regex]::Escape("{{VERSION}}"), $version
 
 $readmeEntry = $zip.CreateEntry("README-RU.txt", [System.IO.Compression.CompressionLevel]::Optimal)
 $readmeStream = $readmeEntry.Open()

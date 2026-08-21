@@ -1,0 +1,96 @@
+name: release
+
+# Два входа:
+#   * push тега v* — ручной релиз;
+#   * workflow_call — вызов из watch.yml после авто-перевода. Тег, созданный
+#     через GITHUB_TOKEN, не запускает workflow повторно, поэтому автоматика
+#     не может рассчитывать на триггер по тегу и вызывает эту сборку напрямую.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Что собирать (тег или SHA)'
+        type: string
+        required: true
+      version:
+        description: 'Имя тега для релиза'
+        type: string
+        required: true
+      gameVersion:
+        description: 'Сборка игры, под которую собран перевод'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VER: ${{ inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # Предохранитель: битые плейсхолдеры {0} и [[TOKEN]] роняют MessageFormat
+      # уже в игре, поэтому такой билд публиковать нельзя
+      - name: Проверка плейсхолдеров
+        shell: pwsh
+        run: ./ru-locale/diff-update.ps1 -FailOnIssues
+
+      - name: Сборка ru-locale.jar
+        run: |
+          set -e
+          mkdir -p build/rsrc/i18n dist
+          cp ru-locale/ru/*.properties build/rsrc/i18n/
+          cd build && zip -qr9 ../dist/ru-locale.jar rsrc
+
+      - name: Сборка архива релиза
+        run: |
+          set -e
+          mkdir -p pkg/code
+          cp dist/ru-locale.jar pkg/code/
+          cp ru-locale/launch-ru-steam.bat ru-locale/launch-ru-debug.bat pkg/
+          printf '\xEF\xBB\xBF' > pkg/README-RU.txt
+          sed "s/{{VERSION}}/${VER}/" ru-locale/RELEASE-README.txt >> pkg/README-RU.txt
+          cd pkg && zip -qr9 "../dist/SpiralKnights-RU-${VER}.zip" .
+
+      # Шапка релиза: версия перевода, под какую сборку игры он собран и когда.
+      # Дописывается перед автоматически сгенерированным списком коммитов.
+      - name: Шапка описания релиза
+        env:
+          GAME_VER: ${{ inputs.gameVersion }}
+        run: |
+          set -e
+          {
+            echo 'RELEASE_BODY<<SK_EOF'
+            echo "**Версия перевода:** \`${VER}\`"
+            if [ -n "${GAME_VER}" ]; then
+              d="${GAME_VER}"
+              echo "**Сборка игры:** \`${GAME_VER}\` (от ${d:6:2}.${d:4:2}.${d:0:4})"
+            fi
+            echo "**Собрано:** $(date -u '+%d.%m.%Y %H:%M UTC')"
+            case "${VER}" in
+              *-mt) echo; echo '> Машинный перевод без ручной вычитки. Помечен как pre-release.' ;;
+            esac
+            echo 'SK_EOF'
+          } >> "$GITHUB_ENV"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VER }}
+          name: "Spiral Knights RU ${{ env.VER }}"
+          body: ${{ env.RELEASE_BODY }}
+          generate_release_notes: true
+          # Релизы с суффиксом -mt собраны машинным переводом без ревью —
+          # помечаем их как pre-release, чтобы игроки видели разницу
+          prerelease: ${{ endsWith(env.VER, '-mt') }}
+          files: |
+            dist/SpiralKnights-RU-*.zip
+            dist/ru-locale.jar

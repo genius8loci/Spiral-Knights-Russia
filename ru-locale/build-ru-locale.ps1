@@ -24,6 +24,12 @@ if (-not $ruFiles) {
     exit 1
 }
 
+# In the game folder code\ always exists; in a bare repo clone it does not
+$outputDir = Split-Path -Parent $outputJar
+if (-not (Test-Path $outputDir)) {
+    New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+}
+
 # Remove old JAR
 if (Test-Path $outputJar) {
     Remove-Item $outputJar -Force

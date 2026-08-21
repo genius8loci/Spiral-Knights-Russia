@@ -1,0 +1,13 @@
+# Ключи MT-провайдеров — никогда не коммитить
+ru-locale/mt-config.local.json
+
+# Рабочий каталог сборки: сюда extract-originals кладёт projectx-config.jar,
+# а build-ru-locale — собранный ru-locale.jar
+code/
+
+# Готовые архивы релиза
+ru-locale/SpiralKnights-RU-*.zip
+
+# Отчёт последнего прогона update.ps1 (снапшот и кэш переводов, наоборот,
+# коммитятся — они нужны при следующем обновлении)
+ru-locale/cache/last-run.json

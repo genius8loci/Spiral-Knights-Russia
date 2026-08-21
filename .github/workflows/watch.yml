@@ -1,0 +1,213 @@
+name: watch
+
+# Следит за обновлениями Spiral Knights и допереводит новые строки без участия
+# человека. Раздача игры (Getdown) лежит на открытом HTTP:
+#   http://gamemedia2.spiralknights.com/spiral/latest/getdown.txt  — номер версии
+#   http://gamemedia2.spiralknights.com/spiral/<version>/code/projectx-config.jar
+# Авторизации нет, в latest/ отдаётся только getdown.txt, поэтому сначала
+# читаем оттуда version, а уже потом идём в каталог конкретной версии.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Прогнать даже если версия игры не изменилась'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: locale-update
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------------------
+  # Дешёвая проверка: 5 КБ вместо 1,4 МБ jar-а
+  # --------------------------------------------------------------------
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.probe.outputs.version }}
+      changed: ${{ steps.probe.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: probe
+        name: Версия игры на CDN
+        run: |
+          set -euo pipefail
+          latest=$(curl -fsS --retry 3 --retry-delay 5 --max-time 60 \
+            http://gamemedia2.spiralknights.com/spiral/latest/getdown.txt \
+            | sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*//p' \
+            | tr -d '[:space:]')
+
+          if [ -z "$latest" ]; then
+            echo "::error::не удалось прочитать version из latest/getdown.txt"
+            exit 1
+          fi
+
+          known=""
+          if [ -f ru-locale/cache/game-version.json ]; then
+            known=$(jq -r '.version // ""' ru-locale/cache/game-version.json)
+          fi
+
+          echo "на CDN: $latest | в репозитории: ${known:-нет}"
+          echo "version=$latest" >> "$GITHUB_OUTPUT"
+
+          if [ "$latest" != "$known" ] || [ "${{ inputs.force }}" = "true" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Игра не обновлялась — выходим." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # --------------------------------------------------------------------
+  # Перевод дельты. Только windows: update.ps1 и SkLocale.psm1 собирают пути
+  # через обратный слеш, на Linux-pwsh они не разрешаются.
+  # --------------------------------------------------------------------
+  update:
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # Свой каталог моделей, чтобы его можно было закэшировать между запусками
+      ARGOS_PACKAGES_DIR: ${{ github.workspace }}\.argos
+    outputs:
+      tag: ${{ steps.commit.outputs.tag }}
+      delta: ${{ steps.translate.outputs.delta }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- последняя ступень каскада: оффлайн-модель en->ru ---------------
+      # Все шаги ниже помечены continue-on-error: argos страхует каскад, но не
+      # должен блокировать прогон, который могут вытянуть остальные провайдеры.
+      - uses: actions/setup-python@v5
+        continue-on-error: true
+        with:
+          python-version: '3.11'
+
+      - name: Кэш модели Argos
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          # На Windows argostranslate 1.11 кладёт модели в ~/.local/share/argos-translate
+          # (проверено), не в %LOCALAPPDATA%. ARGOS_PACKAGES_DIR кэшируем на случай,
+          # если версия его всё-таки учитывает.
+          path: |
+            ~\.local\share\argos-translate
+            ${{ github.workspace }}\.argos
+          key: argos-en-ru-v1
+
+      - name: Установка Argos
+        continue-on-error: true
+        run: pip install --disable-pip-version-check argostranslate
+
+      # Заодно прогревает кэш: модель тянется здесь, а не посреди перевода
+      - name: Проверка модели Argos
+        continue-on-error: true
+        run: |
+          '["ping"]' | Set-Content argos-probe.json -Encoding utf8NoBOM
+          python ru-locale/lib/argos-translate.py argos-probe.json argos-probe-out.json
+          "argos ответил: $(Get-Content argos-probe-out.json -Raw)"
+          Remove-Item argos-probe.json, argos-probe-out.json -Force
+
+      # extract-originals.ps1 ищет jar в <корень репозитория>/code/ —
+      # кладём файл туда и переиспользуем скрипт как есть
+      - name: Скачать projectx-config.jar
+        run: |
+          $ver = '${{ needs.check.outputs.version }}'
+          New-Item -ItemType Directory -Force -Path code | Out-Null
+          $url = "http://gamemedia2.spiralknights.com/spiral/$ver/code/projectx-config.jar"
+          Invoke-WebRequest -Uri $url -OutFile code/projectx-config.jar `
+            -MaximumRetryCount 3 -RetryIntervalSec 10 -TimeoutSec 300
+          "Скачано: {0:N0} байт" -f (Get-Item code/projectx-config.jar).Length
+
+      - id: translate
+        name: Перевод дельты
+        env:
+          DEEPL_KEY: ${{ secrets.DEEPL_KEY }}
+          YANDEX_KEY: ${{ secrets.YANDEX_KEY }}
+          YANDEX_FOLDER: ${{ secrets.YANDEX_FOLDER }}
+          # необязателен: поднимает суточную квоту MyMemory для этого IP
+          MYMEMORY_EMAIL: ${{ secrets.MYMEMORY_EMAIL }}
+        run: |
+          ./ru-locale/update.ps1 -NoBuild -ReportPath ru-locale/cache/last-run.json
+
+          $r = Get-Content ru-locale/cache/last-run.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $delta = $r.new + $r.changed
+          "delta=$delta" >> $env:GITHUB_OUTPUT
+
+          "### Обновление локализации"                     >> $env:GITHUB_STEP_SUMMARY
+          "* версия игры: ``${{ needs.check.outputs.version }}``" >> $env:GITHUB_STEP_SUMMARY
+          "* новых ключей: $($r.new), изменившихся: $($r.changed)" >> $env:GITHUB_STEP_SUMMARY
+          "* записано строк: $($r.applied), не переведено: $($r.failed)" >> $env:GITHUB_STEP_SUMMARY
+
+          # Если каскад провайдеров развалился (нет ключей, все ответили ошибкой),
+          # строки остаются английскими. Публиковать такой релиз бессмысленно.
+          if ($delta -gt 0 -and ($r.failed * 4) -gt $delta) {
+            throw "не переведено $($r.failed) из $delta строк — каскад провайдеров не сработал"
+          }
+
+      - name: Проверка плейсхолдеров
+        run: ./ru-locale/diff-update.ps1 -FailOnIssues
+
+      - id: commit
+        name: Коммит и тег
+        run: |
+          $ver = '${{ needs.check.outputs.version }}'
+          $delta = [int]'${{ steps.translate.outputs.delta }}'
+
+          # Только номер версии, без отметки времени: иначе файл менялся бы на
+          # каждом запуске и «изменений нет» никогда бы не срабатывало
+          @{ version = $ver } |
+            ConvertTo-Json | Set-Content ru-locale/cache/game-version.json -Encoding UTF8
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ru-locale/ru ru-locale/original ru-locale/cache
+
+          if (-not (git diff --cached --name-only)) {
+            "Изменений нет." >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+
+          git commit -m "Авто-обновление локализации: игра $ver (+$delta строк)"
+          git push
+
+          # Тег и релиз — только если реально что-то перевели: патчи игры,
+          # не затрагивающие i18n, обновляют лишь original/ и слепок версии
+          if ($delta -le 0) { exit 0 }
+
+          $tag = 'v{0}.{1}.{2}-mt' -f $ver.Substring(0,4), $ver.Substring(4,2), $ver.Substring(6,2)
+          if (git ls-remote --tags origin "refs/tags/$tag") {
+            # игру пропатчили дважды за сутки — уточняем тег временем сборки
+            $tag = 'v{0}.{1}.{2}.{3}-mt' -f $ver.Substring(0,4), $ver.Substring(4,2),
+                                            $ver.Substring(6,2), $ver.Substring(8,4)
+          }
+
+          git tag $tag
+          git push origin $tag
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "* тег: ``$tag``" >> $env:GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------
+  # Сборка и публикация. Вызывается напрямую: тег, отправленный под
+  # GITHUB_TOKEN, не запускает release.yml по триггеру push.
+  # --------------------------------------------------------------------
+  release:
+    needs: [check, update]
+    if: needs.update.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ needs.update.outputs.tag }}
+      version: ${{ needs.update.outputs.tag }}
+      gameVersion: ${{ needs.check.outputs.version }}

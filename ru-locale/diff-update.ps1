@@ -4,11 +4,20 @@
 # new/changed keys that need translation.
 # ============================================================
 
+[CmdletBinding()]
+param(
+    # Ненулевой код возврата, если найдены проблемы с токенами или непереведённые
+    # ключи. Нужен для использования скрипта как гейта в CI.
+    [switch]$FailOnIssues
+)
+
 $ErrorActionPreference = "Stop"
 
+# Join-Path вместо "$dir\file": скрипт вызывается и из pwsh на Linux-раннере,
+# где обратный слеш не является разделителем пути
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$originalDir = "$scriptDir\original"
-$ruDir = "$scriptDir\ru"
+$originalDir = Join-Path $scriptDir 'original'
+$ruDir = Join-Path $scriptDir 'ru'
 
 if (-not (Test-Path $originalDir)) {
     Write-Host "ERROR: original/ folder not found. Run extract-originals first." -ForegroundColor Red
@@ -24,7 +33,7 @@ Write-Host "=== Comparing originals vs translations ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Get all base English files (no locale suffix)
-$baseFiles = Get-ChildItem "$originalDir\*.properties" | Where-Object {
+$baseFiles = Get-ChildItem (Join-Path $originalDir '*.properties') | Where-Object {
     $_.Name -notmatch '_[a-z]{2}\.properties$'
 }
 
@@ -33,7 +42,7 @@ $totalNew = 0
 $totalTokenIssues = 0
 
 foreach ($baseFile in $baseFiles) {
-    $ruFile = "$ruDir\$($baseFile.Name)"
+    $ruFile = Join-Path $ruDir $baseFile.Name
 
     if (-not (Test-Path $ruFile)) {
         Write-Host "  [NEW FILE] $($baseFile.Name) - no translation exists" -ForegroundColor Yellow
@@ -130,4 +139,13 @@ if ($totalNew -eq 0 -and $totalMissing -eq 0 -and $totalTokenIssues -eq 0) {
     if ($totalTokenIssues -gt 0) {
         Write-Host "  Keys with token/escape issues: $totalTokenIssues" -ForegroundColor Red
     }
+}
+
+# В CI скрипт используется как предохранитель перед публикацией релиза:
+# битые плейсхолдеры {0} / [[TOKEN]] роняют MessageFormat уже в игре,
+# поэтому такой билд выпускать нельзя.
+if ($FailOnIssues -and ($totalNew -gt 0 -or $totalMissing -gt 0 -or $totalTokenIssues -gt 0)) {
+    Write-Host ""
+    Write-Host "FAIL: локализация не прошла проверку." -ForegroundColor Red
+    exit 1
 }
