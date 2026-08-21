@@ -11,7 +11,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/файлов_перевода-41-blue?style=flat-square" alt="Files"/>
-  <img src="https://img.shields.io/badge/переведено_ключей-11600+-green?style=flat-square" alt="Keys"/>
+  <img src="https://img.shields.io/badge/переведено-11359_из_11802-green?style=flat-square" alt="Keys"/>
+  <img src="https://img.shields.io/badge/автообновление-раз_в_6_часов-orange?style=flat-square" alt="Auto"/>
   <img src="https://img.shields.io/badge/платформа-Windows-0078D6?style=flat-square&logo=windows" alt="Platform"/>
   <img src="https://img.shields.io/badge/Steam-совместим-000000?style=flat-square&logo=steam" alt="Steam"/>
 </p>
@@ -26,11 +27,11 @@ Spiral Knights — прекрасная кооперативная Action-RPG, �
 
 | Категория | Файлы | Описание |
 |-----------|-------|----------|
-| 🎮 Интерфейс | `global`, `logon`, `status`, `system` | Кнопки, меню, системные сообщения |
+| 🎮 Интерфейс | `global`, `logon`, `status`, `projectx` | Кнопки, меню, системные сообщения |
 | ⚔️ Предметы | `item`, `item-names` | Названия и описания всего снаряжения |
-| 📜 Задания | `mission`, `mission-names` | Квесты и сюжетные задания |
+| 📜 Задания | `mission` | Квесты и сюжетные задания |
 | 💬 Диалоги | `conversation`, `prologue` | NPC, пролог |
-| 🏰 Подземелья | `dungeon`, `dungeon-names` | Уровни, этажи, локации |
+| 🏰 Подземелья | `dungeon` | Уровни, этажи, локации |
 | 🛒 Торговля | `shop`, `trade`, `auction`, `exchange` | Магазины, аукцион, торговля |
 | ⚒️ Крафт | `craft`, `design` | Ковка и рецепты |
 | 👥 Социальное | `social`, `guild`, `chat`, `invite` | Гильдии, чат, друзья |
@@ -38,10 +39,24 @@ Spiral Knights — прекрасная кооперативная Action-RPG, �
 | 🏟️ PvP/Арена | `pvp`, `arena`, `lottery` | Lockdown, Blast Network |
 | 📋 Прочее | `help`, `helptips`, `support`, `steam`... | Справка, подсказки, Steam |
 
-**Итого: 41 файл, 11 600+ переведённых строк** — покрывает практически весь текстовый контент игры.
-> **Файлы, которые не переведены:**
-> - Spiral Knights\getdown-pro.jar\com\threerings\getdown\messages.properties
-> - Spiral Knights\code\projectx-config.jar\rsrc\i18n\story.properties
+**Итого: 41 файл, 11 359 переведённых строк из 11 802 (96 %)** — покрывает практически весь
+текстовый контент игры. Цифры соответствуют сборке игры `20260820090656`; после каждого
+патча они пересчитываются автоматически.
+
+> **Что осталось на английском и почему:**
+> - `story.properties` — 70 строк сюжетного текста, единственный файл с непереведённым
+>   содержимым (лежит в `code\projectx-config.jar\rsrc\i18n\`)
+> - `system.properties` — только служебные URL биллинга, переводить нечего
+> - `dungeon-names.properties` — два шаблона формата вида `{0} {1}`, переводить нечего
+> - `mission-names.properties`, `building.properties` — пустые файлы
+> - `getdown-pro.jar\com\threerings\getdown\messages.properties` — тексты лаунчера,
+>   вне подменяемого `rsrc/i18n/`
+>
+> Ещё 270 строк намеренно оставлены английскими: это алиасы чат-команд (`/loadout`,
+> `/help`) и привязки клавиш — перевод сломал бы их работу. Пайплайн определяет такие
+> группы сам, по уже существующему переводу, и машине их не отдаёт. Оставшиеся 94 строки
+> совпадают с оригиналом по существу: имена собственные (Steam, PayPal, Spiral Knights)
+> и значения, состоящие из одних подстановок вроде `[[TOGGLE_PANELS]]` или `{0} {1}`.
 
 ---
 
@@ -118,7 +133,10 @@ Spiral Knights — прекрасная кооперативная Action-RPG, �
 | `launch-ru-steam.bat` | Запуск игры с переводом (Steam-версия) |
 | `launch-ru-debug.bat` | Запуск с консолью для отладки |
 
-Каждый `.bat` файл — обёртка над одноимённым `.ps1` скриптом (PowerShell).
+Первые пять `.bat` — обёртки над одноимёнными `.ps1` (PowerShell). Два запускающих
+скрипта самостоятельны: они разбирают `getdown.txt` и собирают classpath сами, без
+PowerShell. Держите их в чистом ASCII — `chcp 65001` в начале файла заставляет `cmd`
+терять позицию чтения на многобайтовых символах, и разбор рассыпается.
 
 ---
 
@@ -200,11 +218,16 @@ update.bat                # полный прогон со сборкой
 }
 ```
 
-Argos ставится отдельно — он последний и работает без сети:
+Argos ставится отдельно — он последний в каскаде и работает без сети:
 
 ```bash
 pip install argostranslate
 ```
+
+Модель en→ru (187 МБ) скачивается при первом запуске. Штатный хост Argos на части
+сетей режется до ~280 Б/с и обрывает загрузку, поэтому helper сначала идёт на
+официальное зеркало `data.argosopentech.com`. Свой адрес можно задать переменной
+`ARGOS_MODEL_URL`, а путь к нужному Python — через `ARGOS_PYTHON`.
 
 ---
 

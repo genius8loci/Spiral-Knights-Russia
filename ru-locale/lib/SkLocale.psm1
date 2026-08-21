@@ -174,9 +174,15 @@ function Protect-Text {
 
     if ($Terms) {
         foreach ($term in $Terms) {
+            # Термин с заглавной буквы ищем с учётом регистра. Иначе интерфейсная
+            # метка "More" -> "Ещё" влезала в обычное предложение на месте слова
+            # "more": "It's even more beautiful" -> "Здесь даже Ещё красиво".
+            # Термины со строчной буквы такой проблемы не создают.
+            $ci = if ($term.En -cmatch '^\p{Lu}') { '' } else { '(?i)' }
+
             # пробелы вокруг термина забираются в подстановку по той же причине,
             # что и вокруг токенов
-            $rx = '(?i)([ \t]*)\b' + [regex]::Escape($term.En) + '\b([ \t]*)'
+            $rx = $ci + '([ \t]*)\b' + [regex]::Escape($term.En) + '\b([ \t]*)'
             if ($t -match $rx) {
                 $ru = $term.Ru
                 $t = [regex]::Replace($t, $rx, {
@@ -270,12 +276,19 @@ function New-TranslationMemory {
         $best = ($variants.GetEnumerator() | Sort-Object -Property Value -Descending | Select-Object -First 1)
         $memory[$en] = $best.Key
 
-        # в глоссарий — только короткие, однозначные, без токенов и служебных символов
+        # в глоссарий — только короткие, однозначные, без токенов и служебных символов.
+        #
+        # Отдельно отсекаем термины, русская сторона которых набрана капсом: это
+        # заголовки и кнопки интерфейса (EYES -> ГЛАЗА, WAITING -> ОЖИДАНИЕ,
+        # LOADOUT -> НАБОР), а не словарная лексика. Подстановка идёт без учёта
+        # регистра, поэтому такой термин влезал в середину обычного предложения:
+        # "Bright Eyes" превращалось в "Яркий ГЛАЗА".
         if ($variants.Count -eq 1 -and
             $en.Length -ge 3 -and
             $en -match '^\w' -and $en -match '\w$' -and
             $en -notmatch '[{}\[\]<>\\=#]' -and
             ($en -split '\s+').Count -le $MaxTermWords -and
+            $best.Key -cmatch '\p{Ll}' -and
             $best.Key -ne $en) {
             [void]$terms.Add([PSCustomObject]@{ En = $en; Ru = $best.Key })
         }
