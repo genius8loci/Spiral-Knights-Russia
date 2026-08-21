@@ -15,14 +15,83 @@ argos стоит последним, и строки останутся англ
 """
 
 import json
+import os
+import shutil
 import sys
+import tempfile
+import urllib.request
 
 FROM_CODE = "en"
 TO_CODE = "ru"
 
+# Официальное зеркало пакетов Argos. Идёт первым намеренно: штатный хост
+# argos-net.com на части сетей режется до ~280 Б/с, и загрузка 187 МБ не
+# доходит до конца — urllib отваливается с IncompleteRead после ~25 КБ.
+MIRROR = "https://data.argosopentech.com/argospm/v1/%s.argosmodel"
+
 
 def log(msg):
     print(msg, file=sys.stderr, flush=True)
+
+
+def candidate_urls(pkg):
+    """Откуда пробовать качать модель, в порядке предпочтения."""
+    urls = []
+
+    override = os.environ.get("ARGOS_MODEL_URL")
+    if override:
+        urls.append(override)
+
+    code = getattr(pkg, "code", None) or "translate-%s_%s" % (FROM_CODE, TO_CODE)
+    version = str(getattr(pkg, "package_version", "") or "").replace(".", "_")
+    if version:
+        urls.append(MIRROR % ("%s-%s" % (code, version)))
+
+    # ссылки из индекса — последними, см. комментарий к MIRROR
+    urls.extend(getattr(pkg, "links", None) or [])
+    return urls
+
+
+def download(url):
+    """Качает .argosmodel во временный файл и проверяет полноту по Content-Length."""
+    log("качаю %s" % url)
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        expected = resp.headers.get("Content-Length")
+        expected = int(expected) if expected else None
+        fd, path = tempfile.mkstemp(suffix=".argosmodel")
+        try:
+            with os.fdopen(fd, "wb") as out:
+                shutil.copyfileobj(resp, out, 1024 * 256)
+        except BaseException:
+            os.unlink(path)
+            raise
+
+    got = os.path.getsize(path)
+    if expected is not None and got != expected:
+        os.unlink(path)
+        raise IOError("получено %d байт из %d" % (got, expected))
+
+    log("скачано %.1f МБ" % (got / 1048576.0))
+    return path
+
+
+def fetch_model(pkg):
+    """Пробует зеркала по очереди; последней попыткой — штатный загрузчик Argos."""
+    errors = []
+    for url in candidate_urls(pkg):
+        try:
+            return download(url)
+        except Exception as exc:  # noqa: BLE001 — важен сам факт неудачи
+            log("  не вышло: %s" % exc)
+            errors.append("%s -> %s" % (url, exc))
+
+    log("пробую штатный загрузчик Argos")
+    try:
+        return pkg.download()
+    except Exception as exc:  # noqa: BLE001
+        errors.append("argostranslate -> %s" % exc)
+
+    raise RuntimeError("модель не скачалась:\n  " + "\n  ".join(errors))
 
 
 def get_translation():
@@ -55,7 +124,14 @@ def get_translation():
     if pkg is None:
         raise RuntimeError("в индексе Argos нет пакета en->ru")
 
-    argostranslate.package.install_from_path(pkg.download())
+    path = fetch_model(pkg)
+    try:
+        argostranslate.package.install_from_path(path)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     log("модель установлена")
 
     tr = find()

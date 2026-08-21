@@ -31,8 +31,19 @@ for /f "usebackq tokens=1,2,* delims==" %%a in ("getdown.txt") do (
         for /f "tokens=*" %%v in ("!val!") do set "val=%%v"
 
         if "!key!"=="code" (
-            set "val=!val:/=\!"
-            set "CP=!CP!;!val!"
+            rem Платформенная метка: [windows] снимаем, [linux] и [mac os x] пропускаем.
+            rem В LWJGL 3 нативные библиотеки лежат внутри jar-ов на classpath, и если
+            rem оставить метку, путь становится несуществующим - игра падает с
+            rem UnsatisfiedLinkError: Failed to locate library: lwjgl.dll
+            rem (внутри скобок только rem: :: здесь ломает разбор блока)
+            set "keep=1"
+            if "!val:~0,1!"=="[" (
+                if /i "!val:~0,9!"=="[windows]" (set "val=!val:*] =!") else (set "keep=0")
+            )
+            if "!keep!"=="1" (
+                set "val=!val:/=\!"
+                set "CP=!CP!;!val!"
+            )
         )
     )
 )
@@ -47,8 +58,12 @@ for /f "usebackq tokens=1,* delims==" %%a in ("getdown.txt") do (
         for /f "tokens=*" %%v in ("!val!") do set "val=%%v"
 
         if "!key!"=="jvmarg" (
-            echo !val! | findstr /i /c:"[mac" /c:"[linux" >nul 2>nul
-            if errorlevel 1 (
+            rem та же обработка метки, что и для code
+            set "keep=1"
+            if "!val:~0,1!"=="[" (
+                if /i "!val:~0,9!"=="[windows]" (set "val=!val:*] =!") else (set "keep=0")
+            )
+            if "!keep!"=="1" (
                 set "val=!val:%%APPDIR%%=%APPDIR%!"
                 set "JVMARGS=!JVMARGS! "!val!""
             )

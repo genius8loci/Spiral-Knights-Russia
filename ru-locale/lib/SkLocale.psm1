@@ -302,7 +302,11 @@ function Invoke-DeepL {
         -Headers @{ Authorization = "DeepL-Auth-Key $Key" } `
         -ContentType 'application/json; charset=utf-8' `
         -Body ([System.Text.Encoding]::UTF8.GetBytes($json))
-    return @($r.translations | ForEach-Object { $_.text })
+    # ,@(...) обязательно: return разворачивает массив из одного элемента в строку,
+    # и вызывающий код получал бы Result[0] = первый СИМВОЛ перевода.
+    # Поштучный переспрос в каскаде всегда идёт одной строкой, так что без этого
+    # ломался бы именно резервный путь.
+    return ,@($r.translations | ForEach-Object { $_.text })
 }
 
 function Invoke-Yandex {
@@ -325,7 +329,7 @@ function Invoke-Yandex {
         -Headers @{ Authorization = "Api-Key $Key" } `
         -ContentType 'application/json; charset=utf-8' `
         -Body ([System.Text.Encoding]::UTF8.GetBytes($json))
-    return @($r.translations | ForEach-Object { $_.text })
+    return ,@($r.translations | ForEach-Object { $_.text })   # см. комментарий в Invoke-DeepL
 }
 
 # MyMemory: документированный бесплатный API, ключ не нужен. Одна строка на запрос,
@@ -391,11 +395,21 @@ function Invoke-Argos {
         }
         if ($LASTEXITCODE -ne 0) { throw "argos-translate.py вернул код $LASTEXITCODE" }
 
-        $res = @(Get-Content $outFile -Raw -Encoding UTF8 | ConvertFrom-Json)
+        # Читаем через .NET и разбираем через -InputObject: Get-Content без явной
+        # кодировки ломает кириллицу, а ConvertFrom-Json, получая данные из
+        # конвейера, отдаёт JSON-массив ОДНИМ объектом — Count всегда был бы 1.
+        $raw = [System.IO.File]::ReadAllText($outFile, [System.Text.Encoding]::UTF8)
+
+        # Два шага намеренно. ConvertFrom-Json отдаёт JSON-массив ОДНИМ объектом,
+        # и @(ConvertFrom-Json ...) обернуло бы его ещё раз — Count всегда был бы 1.
+        # Присваивание в переменную сохраняет массив как есть, и уже её оборачиваем.
+        $parsed = ConvertFrom-Json -InputObject $raw
+        $res = @($parsed)
+
         if ($res.Count -ne $Texts.Count) {
             throw "получено $($res.Count) строк вместо $($Texts.Count)"
         }
-        return $res
+        return ,$res   # см. комментарий в Invoke-DeepL
     }
     finally {
         Remove-Item $inFile, $outFile -Force -ErrorAction SilentlyContinue
