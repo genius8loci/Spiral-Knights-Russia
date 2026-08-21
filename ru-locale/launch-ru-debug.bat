@@ -33,11 +33,13 @@ for /f "usebackq tokens=1,2,* delims==" %%a in ("getdown.txt") do (
         for /f "tokens=1" %%k in ("!key!") do set "key=%%k"
         for /f "tokens=*" %%v in ("!val!") do set "val=%%v"
         if "!key!"=="code" (
-            rem Платформенная метка: [windows] снимаем, [linux] и [mac os x] пропускаем.
-            rem В LWJGL 3 нативные библиотеки лежат внутри jar-ов на classpath, и если
-            rem оставить метку, путь становится несуществующим - игра падает с
+            rem Platform tag: strip [windows], skip [linux] and [mac os x].
+            rem LWJGL 3 ships its natives inside classpath jars, so leaving the
+            rem tag in makes the path bogus and the game dies with
             rem UnsatisfiedLinkError: Failed to locate library: lwjgl.dll
-            rem (внутри скобок только rem: :: здесь ломает разбор блока)
+            rem Keep this file pure ASCII - chcp 65001 above makes cmd lose its
+            rem read position on multi-byte characters and garble the parsing.
+            rem Inside a parenthesised block use rem, not double-colon comments.
             set "keep=1"
             if "!val:~0,1!"=="[" (
                 if /i "!val:~0,9!"=="[windows]" (set "val=!val:*] =!") else (set "keep=0")
@@ -58,7 +60,7 @@ for /f "usebackq tokens=1,* delims==" %%a in ("getdown.txt") do (
         for /f "tokens=1" %%k in ("!key!") do set "key=%%k"
         for /f "tokens=*" %%v in ("!val!") do set "val=%%v"
         if "!key!"=="jvmarg" (
-            rem та же обработка метки, что и для code
+            rem same platform-tag handling as for code above
             set "keep=1"
             if "!val:~0,1!"=="[" (
                 if /i "!val:~0,9!"=="[windows]" (set "val=!val:*] =!") else (set "keep=0")
